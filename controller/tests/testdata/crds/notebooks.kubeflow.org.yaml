@@ -1,0 +1,24 @@
+# Minimal schema-less CRD used only by the envtest integration tests.
+# Production installs use the real CRDs (see charts/kubeflow-notebooks-no-istio/README.md).
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: notebooks.kubeflow.org
+spec:
+  group: kubeflow.org
+  scope: Namespaced
+  names:
+    plural: notebooks
+    singular: notebook
+    kind: Notebook
+    listKind: NotebookList
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    schema:
+      openAPIV3Schema:
+        type: object
+        x-kubernetes-preserve-unknown-fields: true

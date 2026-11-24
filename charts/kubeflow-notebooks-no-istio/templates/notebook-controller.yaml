@@ -1,0 +1,207 @@
+{{- if .Values.notebookController.enabled }}
+{{- $ctx := dict "root" $ "component" "notebook-controller" }}
+{{- $name := include "kni.componentName" $ctx }}
+{{- $nc := .Values.notebookController }}
+# Upstream kubeflow/notebooks notebook-controller, unmodified. Configured with
+# USE_ISTIO=false so it manages StatefulSets, Services and culling only; HTTP
+# exposure is handled by the notebook-route-controller.
+# RBAC mirrors upstream config/rbac/role.yaml without networking.istio.io.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, get, list, patch, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: ["*"]
+  - apiGroups: [apps]
+    resources: [statefulsets]
+    verbs: ["*"]
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, notebooks/status]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- if gt (int $nc.replicas) 1 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $nc.replicas }}
+  selector:
+    matchLabels: {{- include "kni.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "kni.componentLabels" $ctx | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "{{ $nc.image.repository }}:{{ $nc.image.tag }}"
+          imagePullPolicy: {{ $nc.image.pullPolicy }}
+          command: [/manager]
+          args:
+            - --metrics-addr=:8080
+            - --probe-addr=:8081
+            {{- if gt (int $nc.replicas) 1 }}
+            - --enable-leader-election
+            - --leader-election-namespace={{ .Release.Namespace }}
+            {{- end }}
+          env:
+            - name: USE_ISTIO
+              value: "false"
+            - name: CLUSTER_DOMAIN
+              value: {{ $nc.clusterDomain | quote }}
+            - name: ENABLE_CULLING
+              value: {{ $nc.culling.enabled | quote }}
+            - name: CULL_IDLE_TIME
+              value: {{ $nc.culling.idleTimeMinutes | quote }}
+            - name: IDLENESS_CHECK_PERIOD
+              value: {{ $nc.culling.checkPeriodMinutes | quote }}
+            {{- with $nc.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 1000
+            capabilities:
+              drop: [ALL]
+          {{- with $nc.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with $nc.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $nc.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $nc.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if $nc.userClusterRoles }}
+---
+# Upstream config/rbac/user_cluster_roles.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-admin
+  labels:
+    {{- include "kni.labels" . | nindent 4 }}
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-admin: "true"
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.authorization.kubeflow.org/aggregate-to-kubeflow-notebooks-admin: "true"
+rules: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-edit
+  labels:
+    {{- include "kni.labels" . | nindent 4 }}
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-edit: "true"
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-notebooks-admin: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch, create, delete, deletecollection, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-view
+  labels:
+    {{- include "kni.labels" . | nindent 4 }}
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-view: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch]
+{{- end }}
+{{- end }}

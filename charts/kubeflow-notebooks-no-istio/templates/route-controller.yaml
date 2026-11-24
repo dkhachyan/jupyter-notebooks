@@ -1,0 +1,271 @@
+{{- include "kni.validate" . }}
+{{- $ctx := dict "root" $ "component" "notebook-route-controller" }}
+{{- $name := include "kni.componentName" $ctx }}
+{{- $rc := .Values.routeController }}
+{{- $ha := gt (int $rc.replicas) 1 }}
+{{- /* HTTP endpoint serving the namespace list for the Jupyter web app. */}}
+{{- $nsApi := and .Values.jupyterWebApp.enabled .Values.jupyterWebApp.namespaceFilter.enabled }}
+{{- $peers := concat .Values.networkPolicy.gatewayPeers .Values.networkPolicy.extraPeers }}
+{{- if .Values.notebookController.enabled }}
+{{- /* The notebook-controller probes notebook kernels when culling is enabled. */}}
+{{- $peers = append $peers (dict
+      "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" .Release.Namespace))
+      "podSelector" (dict "matchLabels" (fromYaml (include "kni.selectorLabels" (dict "root" $ "component" "notebook-controller"))))) }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks]
+    verbs: [get, list, watch]
+  # Owner references with blockOwnerDeletion on Notebooks.
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks/finalizers]
+    verbs: [update]
+  {{- if $nsApi }}
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+  {{- end }}
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [gateway.envoyproxy.io]
+    resources: [securitypolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  {{- if .Values.networkPolicy.enabled }}
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  {{- end }}
+  # Read-only RBAC to find candidate subjects; decisions come from SubjectAccessReviews.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list, watch]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- if $ha }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+# The controller creates ReferenceGrants in the release namespace so that the
+# per-notebook SecurityPolicies (in the notebooks' namespaces) can reference
+# the oauth2-proxy Service.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-referencegrants
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+rules:
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [referencegrants]
+    verbs: [get, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-referencegrants
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-referencegrants
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- if $nsApi }}
+---
+# HTTP API of the route controller: returns the namespaces where the user in
+# --namespaces-api-user-header may list notebooks. The first rule of the Jupyter
+# web app HTTPRoute proxies GET <prefix>/api/namespaces to it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "kni.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: namespaces-api
+      port: 8082
+      targetPort: namespaces-api
+      protocol: TCP
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $rc.replicas }}
+  selector:
+    matchLabels: {{- include "kni.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "kni.componentLabels" $ctx | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: {{ include "kni.routeControllerImage" . | quote }}
+          imagePullPolicy: {{ $rc.image.pullPolicy }}
+          args:
+            - "--gateway-namespace={{ include "kni.gatewayNamespace" . }}"
+            - "--gateway-name={{ .Values.gateway.name }}"
+            - "--gateway-section-name={{ .Values.gateway.sectionName }}"
+            - "--hostnames={{ .Values.gateway.hostname }}"
+            - "--ext-auth-service-name={{ include "kni.componentName" (dict "root" $ "component" "oauth2-proxy") }}"
+            - "--ext-auth-service-namespace={{ .Release.Namespace }}"
+            - "--ext-auth-service-port=4180"
+            - "--ext-auth-headers-to-backend=authorization"
+            - {{ printf "--ext-auth-headers-to-ext-auth=%s" (join "," .Values.oauth2Proxy.headersToExtAuth) | quote }}
+            - {{ printf "--jwt-provider=%s" (include "kni.jwtProvider" .) | quote }}
+            - "--user-claim={{ .Values.auth.jwt.userClaim }}"
+            - "--groups-claim={{ .Values.auth.jwt.groupsClaim }}"
+            - {{ printf "--user-prefix=%s" $rc.userPrefix | quote }}
+            - {{ printf "--group-prefix=%s" $rc.groupPrefix | quote }}
+            - {{ printf "--ignored-subject-prefixes=%s" (join "," $rc.ignoredSubjectPrefixes) | quote }}
+            - "--access-verb={{ $rc.accessVerb }}"
+            - "--remove-request-headers=authorization"
+            - "--resync-period={{ $rc.resyncPeriod }}"
+            - "--max-concurrent-reconciles={{ $rc.maxConcurrentReconciles }}"
+            - "--network-policy={{ .Values.networkPolicy.enabled }}"
+            {{- if .Values.networkPolicy.enabled }}
+            - {{ printf "--network-policy-peers=%s" (toJson $peers) | quote }}
+            {{- end }}
+            - "--leader-elect={{ $ha }}"
+            - "--metrics-bind-address=:8080"
+            - "--health-probe-bind-address=:8081"
+            - "--zap-log-level={{ $rc.logLevel }}"
+            {{- if $nsApi }}
+            - "--namespaces-api-bind-address=:8082"
+            - "--namespaces-api-user-header={{ .Values.auth.userIdHeader }}"
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+            {{- if $nsApi }}
+            - name: namespaces-api
+              containerPort: 8082
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with $rc.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with $rc.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $rc.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $rc.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if and $nsApi .Values.networkPolicy.enabled }}
+---
+# Only the gateway proxies may reach the namespaces API; metrics and health
+# probe ports stay reachable from everywhere so that scrapers and kubelet
+# probes keep working.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  podSelector: {{- include "kni.selectorLabels" $ctx | nindent 4 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8081
+          protocol: TCP
+    - from: {{- toYaml .Values.networkPolicy.gatewayPeers | nindent 8 }}
+      ports:
+        - port: 8082
+          protocol: TCP
+{{- end }}

@@ -1,0 +1,131 @@
+{{/* Redis session store for oauth2-proxy, used when ID tokens are too large
+for the cookie session store. Single replica without persistence: sessions are
+lost on restart and users log in again. Only created when
+oauth2Proxy.sessionStore.type=redis and .redis.create=true. */}}
+{{- if and (eq .Values.oauth2Proxy.sessionStore.type "redis") .Values.oauth2Proxy.sessionStore.redis.create }}
+{{- $ctx := dict "root" $ "component" "redis" }}
+{{- $name := include "kni.componentName" $ctx }}
+{{- $rs := .Values.oauth2Proxy.sessionStore.redis }}
+{{- if not $rs.existingSecret }}
+{{- $redisPassword := "" }}
+{{- /* Keep the generated Redis password stable across helm upgrades. */}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+{{- if $existing }}
+{{- $redisPassword = index ($existing.data | default dict) "redis-password" | default "" | b64dec }}
+{{- end }}
+{{- if not $redisPassword }}
+{{- $redisPassword = randAlphaNum 32 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+type: Opaque
+stringData:
+  redis-password: {{ $redisPassword | quote }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "kni.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "kni.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "kni.componentLabels" $ctx | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: "{{ $rs.image.repository }}:{{ $rs.image.tag }}"
+          imagePullPolicy: {{ $rs.image.pullPolicy }}
+          command:
+            - redis-server
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --requirepass
+            - "$(REDIS_PASSWORD)"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $rs.existingSecret | default $name }}
+                  key: redis-password
+          ports:
+            - name: redis
+              containerPort: 6379
+          livenessProbe:
+            tcpSocket:
+              port: redis
+          readinessProbe:
+            tcpSocket:
+              port: redis
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with $rs.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+{{- if .Values.networkPolicy.enabled }}
+---
+# Only oauth2-proxy may talk to the session store.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "kni.selectorLabels" $ctx | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "kni.selectorLabels" (dict "root" $ "component" "oauth2-proxy") | nindent 14 }}
+      ports:
+        - port: 6379
+          protocol: TCP
+{{- end }}
+{{- end }}

@@ -1,0 +1,258 @@
+# Default values for kubeflow-notebooks-no-istio.
+# Required: gateway.hostname, auth.oidc.issuer, auth.oidc.clientID,
+# auth.oidc.jwksURI and an OIDC client secret (see auth.oidc.clientSecret).
+
+nameOverride: ""
+fullnameOverride: ""
+imagePullSecrets: []
+
+# -- Upstream Kubeflow notebook-controller, deployed unmodified with USE_ISTIO=false.
+notebookController:
+  enabled: true
+  image:
+    repository: ghcr.io/kubeflow/notebooks/notebook-controller
+    tag: v1.11.1
+    pullPolicy: IfNotPresent
+  replicas: 1
+  clusterDomain: cluster.local
+  # Idle notebook culling (upstream ENABLE_CULLING / CULL_IDLE_TIME / IDLENESS_CHECK_PERIOD).
+  culling:
+    enabled: false
+    idleTimeMinutes: 1440
+    checkPeriodMinutes: 1
+  # Install the upstream aggregated ClusterRoles kubeflow-notebooks-{admin,edit,view}.
+  userClusterRoles: true
+  extraEnv: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -- The notebook-route-controller from this repository.
+routeController:
+  image:
+    repository: notebook-route-controller
+    # Defaults to .Chart.AppVersion.
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Leader election is enabled automatically when replicas > 1.
+  replicas: 1
+  # Verb on notebooks.kubeflow.org/<name> that grants access through the gateway.
+  accessVerb: get
+  # API server OIDC prefixes (--oidc-username-prefix / --oidc-groups-prefix).
+  # RBAC subjects must carry them; they are stripped before matching JWT claims.
+  userPrefix: ""
+  groupPrefix: ""
+  # RBAC subject prefixes that are never turned into gateway principals.
+  ignoredSubjectPrefixes:
+    - "system:"
+  resyncPeriod: 10m
+  maxConcurrentReconciles: 4
+  logLevel: info
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -- Per-notebook NetworkPolicy (created by the route controller) that only lets
+# the gateway proxies and the notebook-controller reach the notebook port.
+# Without Istio there is no mTLS, so this is what stops in-cluster clients from
+# calling the notebook Service directly and bypassing per-notebook authorization.
+# Requires a CNI that enforces NetworkPolicy (with endPort support).
+networkPolicy:
+  enabled: true
+  # Peers matching the Envoy proxy pods of the gateway. The default matches
+  # Envoy Gateway's default deployment mode (proxies in the controller namespace).
+  gatewayPeers:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+  # Additional NetworkPolicyPeers allowed to reach notebook servers.
+  extraPeers: []
+
+# -- Gateway API Gateway the routes attach to (Envoy Gateway).
+gateway:
+  # Create the Gateway. Set to false to attach to an existing one.
+  create: true
+  name: kubeflow-gateway
+  # Defaults to the release namespace.
+  namespace: ""
+  className: eg
+  # Create the GatewayClass for Envoy Gateway (cluster-scoped; usually exists already).
+  createGatewayClass: false
+  # Listener the routes attach to. A dedicated listener is not required: only
+  # this chart's routes carry authentication. A shared listener works too.
+  sectionName: https
+  # Public hostname of Kubeflow (required).
+  hostname: ""
+  listener:
+    port: 443
+    protocol: HTTPS
+    # kubernetes.io/tls Secret in the gateway namespace (only when gateway.create=true).
+    tlsSecretName: kubeflow-gateway-tls
+    allowedRoutes:
+      namespaces:
+        from: All
+
+# -- Authentication. oauth2-proxy performs the OIDC login and is called by Envoy
+# Gateway as the ext_authz backend of every protected route's SecurityPolicy.
+auth:
+  oidc:
+    # Issuer URL, e.g. https://dex.example.com/dex (required).
+    issuer: ""
+    # OIDC client ID registered with the provider (required).
+    clientID: ""
+    clientSecret:
+      # Existing Secret in the release namespace with key "client-secret".
+      existingSecret: ""
+      # Alternatively create the Secret from this value (not for production).
+      value: ""
+    # Address from which Envoy Gateway fetches the JWKS (required).
+    # May be an in-cluster plain-http URL, e.g. http://dex.dex.svc:5556/dex/keys;
+    # the issuer in the tokens must still match auth.oidc.issuer.
+    jwksURI: ""
+    scopes:
+      - openid
+      - email
+      - profile
+      - groups
+  jwt:
+    # Name of the JWT provider referenced by per-notebook authorization rules.
+    providerName: kubeflow
+    # Claim matched against RBAC User subjects.
+    userClaim: email
+    # Claim matched against RBAC Group subjects ("" disables group rules).
+    groupsClaim: groups
+    # Defaults to [auth.oidc.clientID].
+    audiences: []
+  # Header carrying the authenticated user to Kubeflow web apps. Set by the JWT
+  # filter from the validated ID token (claimToHeaders), overwriting any
+  # client-supplied value.
+  userIdHeader: kubeflow-userid
+
+# -- oauth2-proxy: the login service called by Envoy Gateway's ext_authz filter.
+oauth2Proxy:
+  image:
+    repository: quay.io/oauth2-proxy/oauth2-proxy
+    tag: v7.15.6
+    pullPolicy: IfNotPresent
+  replicas: 1
+  cookieSecret:
+    # Existing Secret in the release namespace with key "cookie-secret".
+    existingSecret: ""
+    # Alternatively create the Secret from this value (not for production).
+    # Must be exactly 16, 24 or 32 bytes.
+    value: ""
+  cookieName: _oauth2_proxy_kubeflow
+  # Session lifetime; keep it at or below the ID token lifetime of your IdP.
+  # Token refresh is disabled (cookie-refresh=0), see README Security notes.
+  cookieExpire: 24h
+  # Restrict the session cookie to a subdomain "example.com" of the gateway
+  # hostname. Empty defaults to the gateway hostname itself.
+  cookieDomain: ""
+  # Request headers Envoy Gateway forwards to oauth2-proxy (extAuth-level
+  # headersToExtAuth). By default only Host/Method/Path/Content-Length and
+  # Authorization reach an ext_authz service, so the session cookie must be
+  # listed here — without it oauth2-proxy never sees the session and every
+  # request redirects to login.
+  headersToExtAuth:
+    - cookie
+    - x-forwarded-proto
+    - x-forwarded-host
+    - x-forwarded-for
+  # Path regexes that get a 401 instead of a redirect to the login page, so
+  # that browser fetches from web apps surface an error instead of HTML.
+  apiRoutes:
+    - ^/api/namespaces$
+    - ^/jupyter/api/
+    - ^/notebook/[^/]+/[^/]+/api/
+  # Where oauth2-proxy keeps the session (the ID token). The cookie store holds
+  # it in the browser cookie: use redis when ID tokens are large (many groups),
+  # or they exceed the browser and Envoy Gateway header size limits.
+  sessionStore:
+    # cookie | redis.
+    type: cookie
+    redis:
+      # Deploy a single-replica Redis without persistence (sessions are lost
+      # on restart). Set to false to use an external Redis instead.
+      create: true
+      # External Redis when create=false, e.g. redis://redis.example:6379
+      connectionURL: ""
+      # Secret with the Redis password (key "redis-password"). Empty with
+      # create=true: a Secret is generated in the release namespace.
+      existingSecret: ""
+      image:
+        repository: docker.io/library/redis
+        tag: 7.4-alpine
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi
+  extraArgs: []
+  extraEnv: []
+  extraVolumes: []
+  extraVolumeMounts: []
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -- Upstream Kubeflow Jupyter web app (notebook UI), deployed unmodified.
+jupyterWebApp:
+  enabled: true
+  image:
+    repository: ghcr.io/kubeflow/notebooks/jupyter-web-app
+    tag: v1.11.1
+    pullPolicy: IfNotPresent
+  replicas: 1
+  prefix: /jupyter
+  ui: default
+  secureCookies: true
+  # Contents of spawner_ui_config.yaml (the object with the top-level
+  # "spawnerFormDefaults" key). Empty uses the default shipped in the image.
+  spawnerUIConfig: {}
+  # Redirect "/" to the web app.
+  redirectRoot: true
+  # Filter the namespace list shown in the web app UI: an HTTP endpoint of the
+  # route controller returns only the namespaces where the user (from
+  # auth.userIdHeader) may list notebooks. False restores the upstream
+  # behaviour: the web app then shows all namespaces it gets from
+  # <prefix>/api/namespaces, which requires every user to be able to list
+  # namespaces cluster-wide.
+  namespaceFilter:
+    enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -- Optional Envoy Gateway installation (chart dependency gateway-helm).
+# Leave disabled when Envoy Gateway is already installed in the cluster.
+envoy-gateway:
+  enabled: false

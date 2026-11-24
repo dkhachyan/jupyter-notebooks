@@ -1,0 +1,13 @@
+{{- if .Values.auth.oidc.clientSecret.value }}
+# OIDC client secret used by oauth2-proxy (auth.oidc.clientSecret; passed to the
+# container as OAUTH2_PROXY_CLIENT_SECRET in templates/oauth2-proxy.yaml).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kni.oidcSecretName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  client-secret: {{ .Values.auth.oidc.clientSecret.value | quote }}
+{{- end }}

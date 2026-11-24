@@ -1,0 +1,34 @@
+# Self-contained development install on kind: installs Envoy Gateway as a
+# chart dependency into the release namespace and creates the GatewayClass.
+# Run `helm dependency build` first. Not for production (inline client secret
+# and cookie secret).
+gateway:
+  createGatewayClass: true
+  hostname: kubeflow.127.0.0.1.nip.io
+
+auth:
+  oidc:
+    issuer: https://dex.127.0.0.1.nip.io/dex
+    clientID: kubeflow-dev
+    clientSecret:
+      value: dev-only-secret
+    jwksURI: https://dex.127.0.0.1.nip.io/dex/keys
+
+routeController:
+  image:
+    repository: notebook-route-controller
+    tag: dev
+    pullPolicy: Never   # kind load docker-image notebook-route-controller:dev
+
+networkPolicy:
+  # With the dependency enabled, Envoy proxies run in the release namespace.
+  gatewayPeers:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kubeflow
+
+envoy-gateway:
+  enabled: true

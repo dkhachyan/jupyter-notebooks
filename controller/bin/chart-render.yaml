@@ -1,0 +1,2038 @@
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+# Only the gateway proxies may reach the namespaces API; metrics and health
+# probe ports stay reachable from everywhere so that scrapers and kubelet
+# probes keep working.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+spec:
+  podSelector:
+    app.kubernetes.io/name: notebook-route-controller
+    app.kubernetes.io/instance: it
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8081
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+      ports:
+        - port: 8082
+          protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+# Upstream kubeflow/notebooks Jupyter web app, unmodified. It authorizes every
+# API call itself with SubjectAccessReviews for the user in auth.userIdHeader,
+# which the gateway sets from the validated ID token.
+# RBAC mirrors upstream manifests/base/cluster-role.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+# Upstream kubeflow/notebooks notebook-controller, unmodified. Configured with
+# USE_ISTIO=false so it manages StatefulSets, Services and culling only; HTTP
+# exposure is handled by the notebook-route-controller.
+# RBAC mirrors upstream config/rbac/role.yaml without networking.istio.io.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-controller
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+---
+# Source: kubeflow-notebooks-no-istio/templates/oauth2-proxy.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: oauth2-proxy
+type: Opaque
+stringData:
+  cookie-secret: "D4SoDUAaf19bDMJQ2Pn6W8mQmAJNTs6C"
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+rules:
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list, create, delete, patch, update]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, delete, get, list]
+  - apiGroups: [""]
+    resources: [events, nodes]
+    verbs: [list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [list, get]
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+# Upstream user-facing roles for the web app.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-admin
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-admin: "true"
+rules: []
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-edit
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-edit: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list, create, delete]
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-view
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-view: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-controller
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, get, list, patch, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: ["*"]
+  - apiGroups: [apps]
+    resources: [statefulsets]
+    verbs: ["*"]
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, notebooks/status]
+    verbs: ["*"]
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+# Upstream config/rbac/user_cluster_roles.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-admin
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-admin: "true"
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.authorization.kubeflow.org/aggregate-to-kubeflow-notebooks-admin: "true"
+rules: []
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-edit
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-edit: "true"
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-notebooks-admin: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch, create, delete, deletecollection, patch, update]
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-view
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-view: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch]
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks]
+    verbs: [get, list, watch]
+  # Owner references with blockOwnerDeletion on Notebooks.
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks/finalizers]
+    verbs: [update]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [gateway.envoyproxy.io]
+    resources: [securitypolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Read-only RBAC to find candidate subjects; decisions come from SubjectAccessReviews.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list, watch]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+subjects:
+  - kind: ServiceAccount
+    name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+    namespace: kubeflow
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+subjects:
+  - kind: ServiceAccount
+    name: it-kubeflow-notebooks-no-istio-notebook-controller
+    namespace: kubeflow
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+subjects:
+  - kind: ServiceAccount
+    name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+    namespace: kubeflow
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+# The controller creates ReferenceGrants in the release namespace so that the
+# per-notebook SecurityPolicies (in the notebooks' namespaces) can reference
+# the oauth2-proxy Service.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller-referencegrants
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+rules:
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [referencegrants]
+    verbs: [get, create, update, patch, delete]
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller-referencegrants
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller-referencegrants
+subjects:
+  - kind: ServiceAccount
+    name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+    namespace: kubeflow
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: jupyter-web-app
+    app.kubernetes.io/instance: it
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+      protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/oauth2-proxy.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: oauth2-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/instance: it
+  ports:
+    - name: http
+      port: 4180
+      targetPort: http
+      protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+# HTTP API of the route controller: returns the namespaces where the user in
+# --namespaces-api-user-header may list notebooks. The first rule of the Jupyter
+# web app HTTPRoute proxies GET <prefix>/api/namespaces to it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: notebook-route-controller
+    app.kubernetes.io/instance: it
+  ports:
+    - name: namespaces-api
+      port: 8082
+      targetPort: namespaces-api
+      protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jupyter-web-app
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: jupyter-web-app
+    spec:
+      serviceAccountName: it-kubeflow-notebooks-no-istio-jupyter-web-app
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: jupyter-web-app
+          image: "ghcr.io/kubeflow/notebooks/jupyter-web-app:v1.11.1"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: APP_PREFIX
+              value: "/jupyter"
+            - name: UI
+              value: "default"
+            - name: USERID_HEADER
+              value: "kubeflow-userid"
+            - name: USERID_PREFIX
+              value: ""
+            - name: APP_SECURE_COOKIES
+              value: "true"
+            - name: METRICS
+              value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 1000
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-controller
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: notebook-controller
+    spec:
+      serviceAccountName: it-kubeflow-notebooks-no-istio-notebook-controller
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "ghcr.io/kubeflow/notebooks/notebook-controller:v1.11.1"
+          imagePullPolicy: IfNotPresent
+          command: [/manager]
+          args:
+            - --metrics-addr=:8080
+            - --probe-addr=:8081
+          env:
+            - name: USE_ISTIO
+              value: "false"
+            - name: CLUSTER_DOMAIN
+              value: "cluster.local"
+            - name: ENABLE_CULLING
+              value: "false"
+            - name: CULL_IDLE_TIME
+              value: "1440"
+            - name: IDLENESS_CHECK_PERIOD
+              value: "1"
+          ports:
+            - name: metrics
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 1000
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+# Source: kubeflow-notebooks-no-istio/templates/oauth2-proxy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: oauth2-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: oauth2-proxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth2-proxy
+          image: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.6"
+          imagePullPolicy: IfNotPresent
+          args:
+            - --provider=oidc
+            - "--oidc-issuer-url=https://dex.example.com/dex"
+            - "--client-id=kubeflow-notebooks"
+            - "--redirect-url=https://kubeflow.example.com/oauth2/callback"
+            - "--scope=openid email profile groups"
+            - "--user-id-claim=email"
+            - "--oidc-groups-claim=groups"
+            - --http-address=0.0.0.0:4180
+            - --reverse-proxy=true
+            - --upstream=static://200
+            - --set-authorization-header=true
+            - --skip-provider-button=true
+            - "--email-domain=*"
+            - --code-challenge-method=S256
+            - "--cookie-name=_oauth2_proxy_kubeflow"
+            - "--cookie-expire=24h"
+            - --cookie-refresh=0
+            - --cookie-secure=true
+            - --cookie-samesite=lax
+            - "--api-route=^/jupyter/api/"
+            - "--api-route=^/notebook/[^/]+/[^/]+/api/"
+            - --silence-ping-logging=true
+          ports:
+            - name: http
+              containerPort: 4180
+          env:
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kubeflow-notebooks-oidc
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+                  key: cookie-secret
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-route-controller
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: notebook-route-controller
+    spec:
+      serviceAccountName: it-kubeflow-notebooks-no-istio-notebook-route-controller
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "registry.example.com/kubeflow/notebook-route-controller:0.1.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--gateway-namespace=kubeflow"
+            - "--gateway-name=kubeflow-gateway"
+            - "--gateway-section-name=https"
+            - "--hostnames=kubeflow.example.com"
+            - "--ext-auth-service-name=it-kubeflow-notebooks-no-istio-oauth2-proxy"
+            - "--ext-auth-service-namespace=kubeflow"
+            - "--ext-auth-service-port=4180"
+            - "--ext-auth-headers-to-backend=authorization"
+            - "--ext-auth-headers-to-ext-auth=cookie,x-forwarded-proto,x-forwarded-host,x-forwarded-for"
+            - "--jwt-provider={\"audiences\":[\"kubeflow-notebooks\"],\"claimToHeaders\":[{\"claim\":\"email\",\"header\":\"kubeflow-userid\"}],\"issuer\":\"https://dex.example.com/dex\",\"name\":\"kubeflow\",\"remoteJWKS\":{\"uri\":\"https://dex.example.com/dex/keys\"}}"
+            - "--user-claim=email"
+            - "--groups-claim=groups"
+            - "--user-prefix="
+            - "--group-prefix="
+            - "--ignored-subject-prefixes=system:"
+            - "--access-verb=get"
+            - "--remove-request-headers=authorization"
+            - "--resync-period=10m"
+            - "--max-concurrent-reconciles=4"
+            - "--network-policy=true"
+            - "--network-policy-peers=[{\"namespaceSelector\":{\"matchLabels\":{\"kubernetes.io/metadata.name\":\"envoy-gateway-system\"}},\"podSelector\":{\"matchLabels\":{\"app.kubernetes.io/name\":\"envoy\"}}},{\"namespaceSelector\":{\"matchLabels\":{\"kubernetes.io/metadata.name\":\"kubeflow\"}},\"podSelector\":{\"matchLabels\":{\"app.kubernetes.io/instance\":\"it\",\"app.kubernetes.io/name\":\"notebook-controller\"}}}]"
+            - "--leader-elect=false"
+            - "--metrics-bind-address=:8080"
+            - "--health-probe-bind-address=:8081"
+            - "--zap-log-level=info"
+            - "--namespaces-api-bind-address=:8082"
+            - "--namespaces-api-user-header=kubeflow-userid"
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: namespaces-api
+              containerPort: 8082
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+# Source: kubeflow-notebooks-no-istio/templates/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: kubeflow-gateway
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: https
+      hostname: "kubeflow.example.com"
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: kubeflow-example-com-tls
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+spec:
+  parentRefs:
+    - namespace: kubeflow
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      name: kubeflow-gateway
+      sectionName: https
+  hostnames:
+    - "kubeflow.example.com"
+  rules:
+    # Namespace dropdown of the web app: served by the route controller, which
+    # filters namespaces by the list-notebooks permission of the user. Must be
+    # a rule of THIS route so that the SecurityPolicy above (ext_authz + jwt
+    # setting the trusted auth.userIdHeader) applies to it. No URLRewrite: the
+    # endpoint parses the raw path.
+    - matches:
+        - path:
+            type: Exact
+            value: /jupyter/api/namespaces
+      backendRefs:
+        - name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+          port: 8082
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /jupyter
+      # Same rewrite as the upstream Istio VirtualService of the web app.
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-forwarded-prefix
+                value: "/jupyter"
+      backendRefs:
+        - name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+          port: 80
+    - matches:
+        - path:
+            type: Exact
+            value: /
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /jupyter/
+            statusCode: 302
+---
+# Source: kubeflow-notebooks-no-istio/templates/oauth2-proxy.yaml
+# Login, callback and sign-out. Must NOT carry a SecurityPolicy: the ext_authz
+# check itself redirects here when there is no valid session.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: oauth2-proxy
+spec:
+  parentRefs:
+    - namespace: kubeflow
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      name: kubeflow-gateway
+      sectionName: https
+  hostnames:
+    - "kubeflow.example.com"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /oauth2
+      backendRefs:
+        - name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+          port: 4180
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+# Per-route authentication for the web app: ext_authz against oauth2-proxy
+# (login redirect / Authorization header) followed by JWT validation, which
+# replaces the client-sent userIdHeader with the value from the validated ID
+# token. No authorization policy: the web app authorizes every API call itself
+# (SubjectAccessReviews for the user in auth.userIdHeader).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  extAuth:
+    {"headersToExtAuth":["cookie","x-forwarded-proto","x-forwarded-host","x-forwarded-for"],"http":{"backendRefs":[{"name":"it-kubeflow-notebooks-no-istio-oauth2-proxy","namespace":"kubeflow","port":4180}],"headersToBackend":["authorization"]}}
+  jwt:
+    providers:
+      -
+        {"audiences":["kubeflow-notebooks"],"claimToHeaders":[{"claim":"email","header":"kubeflow-userid"}],"issuer":"https://dex.example.com/dex","name":"kubeflow","remoteJWKS":{"uri":"https://dex.example.com/dex/keys"}}
+---
+---
+# Source: kubeflow-notebooks-no-istio/templates/redis.yaml
+# Only oauth2-proxy may talk to the session store.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: it-kubeflow-notebooks-no-istio-redis
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: redis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: it
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: oauth2-proxy
+              app.kubernetes.io/instance: it
+      ports:
+        - port: 6379
+          protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+# Only the gateway proxies may reach the namespaces API; metrics and health
+# probe ports stay reachable from everywhere so that scrapers and kubelet
+# probes keep working.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+spec:
+  podSelector:
+    app.kubernetes.io/name: notebook-route-controller
+    app.kubernetes.io/instance: it
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8081
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gateway-infra
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: shared-gateway
+      ports:
+        - port: 8082
+          protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+# Upstream kubeflow/notebooks Jupyter web app, unmodified. It authorizes every
+# API call itself with SubjectAccessReviews for the user in auth.userIdHeader,
+# which the gateway sets from the validated ID token.
+# RBAC mirrors upstream manifests/base/cluster-role.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+# Upstream kubeflow/notebooks notebook-controller, unmodified. Configured with
+# USE_ISTIO=false so it manages StatefulSets, Services and culling only; HTTP
+# exposure is handled by the notebook-route-controller.
+# RBAC mirrors upstream config/rbac/role.yaml without networking.istio.io.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-controller
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+---
+# Source: kubeflow-notebooks-no-istio/templates/oauth2-proxy.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: oauth2-proxy
+type: Opaque
+stringData:
+  cookie-secret: "eSOO3l1ycPvN79GjwpGnDH7SiOoi8EiC"
+---
+# Source: kubeflow-notebooks-no-istio/templates/redis.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: it-kubeflow-notebooks-no-istio-redis
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: redis
+type: Opaque
+stringData:
+  redis-password: "jl6yzawpPKz6HfKGpioxVlFAqNr1JqOt"
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+rules:
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list, create, delete, patch, update]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, delete, get, list]
+  - apiGroups: [""]
+    resources: [events, nodes]
+    verbs: [list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [list, get]
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+# Upstream user-facing roles for the web app.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-admin
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-admin: "true"
+rules: []
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-edit
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-edit: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list, create, delete]
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-view
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-view: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-controller
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, get, list, patch, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: ["*"]
+  - apiGroups: [apps]
+    resources: [statefulsets]
+    verbs: ["*"]
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, notebooks/status]
+    verbs: ["*"]
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+# Upstream config/rbac/user_cluster_roles.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-admin
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-admin: "true"
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.authorization.kubeflow.org/aggregate-to-kubeflow-notebooks-admin: "true"
+rules: []
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-edit
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-edit: "true"
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-notebooks-admin: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch, create, delete, deletecollection, patch, update]
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-view
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-view: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch]
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks]
+    verbs: [get, list, watch]
+  # Owner references with blockOwnerDeletion on Notebooks.
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks/finalizers]
+    verbs: [update]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [gateway.envoyproxy.io]
+    resources: [securitypolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Read-only RBAC to find candidate subjects; decisions come from SubjectAccessReviews.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list, watch]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+subjects:
+  - kind: ServiceAccount
+    name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+    namespace: kubeflow
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+subjects:
+  - kind: ServiceAccount
+    name: it-kubeflow-notebooks-no-istio-notebook-controller
+    namespace: kubeflow
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+subjects:
+  - kind: ServiceAccount
+    name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+    namespace: kubeflow
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+# The controller creates ReferenceGrants in the release namespace so that the
+# per-notebook SecurityPolicies (in the notebooks' namespaces) can reference
+# the oauth2-proxy Service.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller-referencegrants
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+rules:
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [referencegrants]
+    verbs: [get, create, update, patch, delete]
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller-referencegrants
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller-referencegrants
+subjects:
+  - kind: ServiceAccount
+    name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+    namespace: kubeflow
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: jupyter-web-app
+    app.kubernetes.io/instance: it
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+      protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/oauth2-proxy.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: oauth2-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/instance: it
+  ports:
+    - name: http
+      port: 4180
+      targetPort: http
+      protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/redis.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: it-kubeflow-notebooks-no-istio-redis
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: redis
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: it
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+# HTTP API of the route controller: returns the namespaces where the user in
+# --namespaces-api-user-header may list notebooks. The first rule of the Jupyter
+# web app HTTPRoute proxies GET <prefix>/api/namespaces to it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: notebook-route-controller
+    app.kubernetes.io/instance: it
+  ports:
+    - name: namespaces-api
+      port: 8082
+      targetPort: namespaces-api
+      protocol: TCP
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jupyter-web-app
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: jupyter-web-app
+    spec:
+      serviceAccountName: it-kubeflow-notebooks-no-istio-jupyter-web-app
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: jupyter-web-app
+          image: "ghcr.io/kubeflow/notebooks/jupyter-web-app:v1.11.1"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: APP_PREFIX
+              value: "/jupyter"
+            - name: UI
+              value: "default"
+            - name: USERID_HEADER
+              value: "kubeflow-userid"
+            - name: USERID_PREFIX
+              value: ""
+            - name: APP_SECURE_COOKIES
+              value: "true"
+            - name: METRICS
+              value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 1000
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-controller
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: notebook-controller
+    spec:
+      serviceAccountName: it-kubeflow-notebooks-no-istio-notebook-controller
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "ghcr.io/kubeflow/notebooks/notebook-controller:v1.11.1"
+          imagePullPolicy: IfNotPresent
+          command: [/manager]
+          args:
+            - --metrics-addr=:8080
+            - --probe-addr=:8081
+          env:
+            - name: USE_ISTIO
+              value: "false"
+            - name: CLUSTER_DOMAIN
+              value: "cluster.local"
+            - name: ENABLE_CULLING
+              value: "false"
+            - name: CULL_IDLE_TIME
+              value: "1440"
+            - name: IDLENESS_CHECK_PERIOD
+              value: "1"
+          ports:
+            - name: metrics
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 1000
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+# Source: kubeflow-notebooks-no-istio/templates/oauth2-proxy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: oauth2-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: oauth2-proxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth2-proxy
+          image: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.6"
+          imagePullPolicy: IfNotPresent
+          args:
+            - --provider=oidc
+            - "--oidc-issuer-url=https://idp.example.com/realms/master"
+            - "--client-id=kubeflow-notebooks"
+            - "--redirect-url=https://kubeflow.example.com/oauth2/callback"
+            - "--scope=openid email profile groups"
+            - "--user-id-claim=email"
+            - "--oidc-groups-claim=groups"
+            - --http-address=0.0.0.0:4180
+            - --reverse-proxy=true
+            - --upstream=static://200
+            - --set-authorization-header=true
+            - --skip-provider-button=true
+            - "--email-domain=*"
+            - --code-challenge-method=S256
+            - --session-store-type=redis
+            - "--redis-connection-url=redis://it-kubeflow-notebooks-no-istio-redis:6379"
+            - "--cookie-name=_oauth2_proxy_kubeflow"
+            - "--cookie-expire=24h"
+            - --cookie-refresh=0
+            - --cookie-secure=true
+            - --cookie-samesite=lax
+            - "--api-route=^/jupyter/api/"
+            - "--api-route=^/notebook/[^/]+/[^/]+/api/"
+            - --silence-ping-logging=true
+            - "--provider-ca-file=/etc/ssl/idp/ca.crt"
+          ports:
+            - name: http
+              containerPort: 4180
+          env:
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kubeflow-oidc
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+                  key: cookie-secret
+            - name: OAUTH2_PROXY_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: it-kubeflow-notebooks-no-istio-redis
+                  key: redis-password
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          volumeMounts:
+            - mountPath: /etc/ssl/idp
+              name: idp-ca
+              readOnly: true
+      volumes:
+        - name: idp-ca
+          secret:
+            secretName: idp-ca
+---
+# Source: kubeflow-notebooks-no-istio/templates/redis.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-redis
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: "docker.io/library/redis:7.4-alpine"
+          imagePullPolicy: IfNotPresent
+          command:
+            - redis-server
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --requirepass
+            - "$(REDIS_PASSWORD)"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: it-kubeflow-notebooks-no-istio-redis
+                  key: redis-password
+          ports:
+            - name: redis
+              containerPort: 6379
+          livenessProbe:
+            tcpSocket:
+              port: redis
+          readinessProbe:
+            tcpSocket:
+              port: redis
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+# Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: notebook-route-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-route-controller
+      app.kubernetes.io/instance: it
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+        app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+        app.kubernetes.io/instance: it
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: notebook-route-controller
+    spec:
+      serviceAccountName: it-kubeflow-notebooks-no-istio-notebook-route-controller
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "registry.example.com/kubeflow/notebook-route-controller:0.1.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--gateway-namespace=gateway-infra"
+            - "--gateway-name=shared-gateway"
+            - "--gateway-section-name=https"
+            - "--hostnames=kubeflow.example.com"
+            - "--ext-auth-service-name=it-kubeflow-notebooks-no-istio-oauth2-proxy"
+            - "--ext-auth-service-namespace=kubeflow"
+            - "--ext-auth-service-port=4180"
+            - "--ext-auth-headers-to-backend=authorization"
+            - "--ext-auth-headers-to-ext-auth=cookie,x-forwarded-proto,x-forwarded-host,x-forwarded-for"
+            - "--jwt-provider={\"audiences\":[\"kubeflow-notebooks\"],\"claimToHeaders\":[{\"claim\":\"email\",\"header\":\"kubeflow-userid\"}],\"issuer\":\"https://idp.example.com/realms/master\",\"name\":\"kubeflow\",\"remoteJWKS\":{\"uri\":\"http://idp.idp.svc:8080/realms/master/protocol/openid-connect/certs\"}}"
+            - "--user-claim=email"
+            - "--groups-claim=groups"
+            - "--user-prefix="
+            - "--group-prefix="
+            - "--ignored-subject-prefixes=system:"
+            - "--access-verb=get"
+            - "--remove-request-headers=authorization"
+            - "--resync-period=10m"
+            - "--max-concurrent-reconciles=4"
+            - "--network-policy=true"
+            - "--network-policy-peers=[{\"namespaceSelector\":{\"matchLabels\":{\"kubernetes.io/metadata.name\":\"gateway-infra\"}},\"podSelector\":{\"matchLabels\":{\"gateway.envoyproxy.io/owning-gateway-name\":\"shared-gateway\"}}},{\"namespaceSelector\":{\"matchLabels\":{\"kubernetes.io/metadata.name\":\"kubeflow\"}},\"podSelector\":{\"matchLabels\":{\"app.kubernetes.io/instance\":\"it\",\"app.kubernetes.io/name\":\"notebook-controller\"}}}]"
+            - "--leader-elect=false"
+            - "--metrics-bind-address=:8080"
+            - "--health-probe-bind-address=:8081"
+            - "--zap-log-level=info"
+            - "--namespaces-api-bind-address=:8082"
+            - "--namespaces-api-user-header=kubeflow-userid"
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: namespaces-api
+              containerPort: 8082
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+spec:
+  parentRefs:
+    - namespace: gateway-infra
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      name: shared-gateway
+      sectionName: https
+  hostnames:
+    - "kubeflow.example.com"
+  rules:
+    # Namespace dropdown of the web app: served by the route controller, which
+    # filters namespaces by the list-notebooks permission of the user. Must be
+    # a rule of THIS route so that the SecurityPolicy above (ext_authz + jwt
+    # setting the trusted auth.userIdHeader) applies to it. No URLRewrite: the
+    # endpoint parses the raw path.
+    - matches:
+        - path:
+            type: Exact
+            value: /jupyter/api/namespaces
+      backendRefs:
+        - name: it-kubeflow-notebooks-no-istio-notebook-route-controller
+          port: 8082
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /jupyter
+      # Same rewrite as the upstream Istio VirtualService of the web app.
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-forwarded-prefix
+                value: "/jupyter"
+      backendRefs:
+        - name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+          port: 80
+    - matches:
+        - path:
+            type: Exact
+            value: /
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /jupyter/
+            statusCode: 302
+---
+# Source: kubeflow-notebooks-no-istio/templates/oauth2-proxy.yaml
+# Login, callback and sign-out. Must NOT carry a SecurityPolicy: the ext_authz
+# check itself redirects here when there is no valid session.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: oauth2-proxy
+spec:
+  parentRefs:
+    - namespace: gateway-infra
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      name: shared-gateway
+      sectionName: https
+  hostnames:
+    - "kubeflow.example.com"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /oauth2
+      backendRefs:
+        - name: it-kubeflow-notebooks-no-istio-oauth2-proxy
+          port: 4180
+---
+# Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
+# Per-route authentication for the web app: ext_authz against oauth2-proxy
+# (login redirect / Authorization header) followed by JWT validation, which
+# replaces the client-sent userIdHeader with the value from the validated ID
+# token. No authorization policy: the web app authorizes every API call itself
+# (SubjectAccessReviews for the user in auth.userIdHeader).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  namespace: kubeflow
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: jupyter-web-app
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: it-kubeflow-notebooks-no-istio-jupyter-web-app
+  extAuth:
+    {"headersToExtAuth":["cookie","x-forwarded-proto","x-forwarded-host","x-forwarded-for"],"http":{"backendRefs":[{"name":"it-kubeflow-notebooks-no-istio-oauth2-proxy","namespace":"kubeflow","port":4180}],"headersToBackend":["authorization"]}}
+  jwt:
+    providers:
+      -
+        {"audiences":["kubeflow-notebooks"],"claimToHeaders":[{"claim":"email","header":"kubeflow-userid"}],"issuer":"https://idp.example.com/realms/master","name":"kubeflow","remoteJWKS":{"uri":"http://idp.idp.svc:8080/realms/master/protocol/openid-connect/certs"}}

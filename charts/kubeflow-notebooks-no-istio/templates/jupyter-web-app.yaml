@@ -1,0 +1,280 @@
+{{- if .Values.jupyterWebApp.enabled }}
+{{- $ctx := dict "root" $ "component" "jupyter-web-app" }}
+{{- $name := include "kni.componentName" $ctx }}
+{{- $jwa := .Values.jupyterWebApp }}
+# Upstream kubeflow/notebooks Jupyter web app, unmodified. It authorizes every
+# API call itself with SubjectAccessReviews for the user in auth.userIdHeader,
+# which the gateway sets from the validated ID token.
+# RBAC mirrors upstream manifests/base/cluster-role.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+rules:
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list, create, delete, patch, update]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, delete, get, list]
+  - apiGroups: [""]
+    resources: [events, nodes]
+    verbs: [list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [list, get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.notebookController.userClusterRoles }}
+---
+# Upstream user-facing roles for the web app.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-admin
+  labels:
+    {{- include "kni.labels" . | nindent 4 }}
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-admin: "true"
+rules: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-edit
+  labels:
+    {{- include "kni.labels" . | nindent 4 }}
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-edit: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list, create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebook-ui-view
+  labels:
+    {{- include "kni.labels" . | nindent 4 }}
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-view: "true"
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/finalizers, poddefaults]
+    verbs: [get, list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+{{- end }}
+{{- if $jwa.spawnerUIConfig }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+data:
+  spawner_ui_config.yaml: |
+    {{- toYaml $jwa.spawnerUIConfig | nindent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "kni.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $jwa.replicas }}
+  selector:
+    matchLabels: {{- include "kni.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "kni.componentLabels" $ctx | nindent 8 }}
+      {{- if $jwa.spawnerUIConfig }}
+      annotations:
+        checksum/config: {{ toYaml $jwa.spawnerUIConfig | sha256sum }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: jupyter-web-app
+          image: "{{ $jwa.image.repository }}:{{ $jwa.image.tag }}"
+          imagePullPolicy: {{ $jwa.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: APP_PREFIX
+              value: {{ $jwa.prefix | quote }}
+            - name: UI
+              value: {{ $jwa.ui | quote }}
+            - name: USERID_HEADER
+              value: {{ .Values.auth.userIdHeader | quote }}
+            - name: USERID_PREFIX
+              value: ""
+            - name: APP_SECURE_COOKIES
+              value: {{ $jwa.secureCookies | quote }}
+            - name: METRICS
+              value: "1"
+          {{- if $jwa.spawnerUIConfig }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/config
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 1000
+            capabilities:
+              drop: [ALL]
+          {{- with $jwa.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- if $jwa.spawnerUIConfig }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}-config
+      {{- end }}
+      {{- with $jwa.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $jwa.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $jwa.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  parentRefs:
+    - namespace: {{ include "kni.gatewayNamespace" . }}
+      {{- include "kni.gatewayRef" . | nindent 6 }}
+  hostnames:
+    - {{ .Values.gateway.hostname | quote }}
+  rules:
+    {{- if .Values.jupyterWebApp.namespaceFilter.enabled }}
+    # Namespace dropdown of the web app: served by the route controller, which
+    # filters namespaces by the list-notebooks permission of the user. Must be
+    # a rule of THIS route so that the SecurityPolicy above (ext_authz + jwt
+    # setting the trusted auth.userIdHeader) applies to it. The dropdown requests
+    # the absolute /api/namespaces (served by the central dashboard in Kubeflow);
+    # the prefixed path is the web app's own endpoint.
+    - matches:
+        - path:
+            type: Exact
+            value: /api/namespaces
+        - path:
+            type: Exact
+            value: {{ printf "%s/api/namespaces" (trimSuffix "/" $jwa.prefix) }}
+      backendRefs:
+        - name: {{ include "kni.componentName" (dict "root" $ "component" "notebook-route-controller") }}
+          port: 8082
+    {{- end }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ $jwa.prefix }}
+      # Same rewrite as the upstream Istio VirtualService of the web app.
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-forwarded-prefix
+                value: {{ $jwa.prefix | quote }}
+      backendRefs:
+        - name: {{ $name }}
+          port: 80
+    {{- if $jwa.redirectRoot }}
+    - matches:
+        - path:
+            type: Exact
+            value: /
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: {{ printf "%s/" (trimSuffix "/" $jwa.prefix) }}
+            statusCode: 302
+    {{- end }}
+---
+# Per-route authentication for the web app: ext_authz against oauth2-proxy
+# (login redirect / Authorization header) followed by JWT validation, which
+# replaces the client-sent userIdHeader with the value from the validated ID
+# token. No authorization policy: the web app authorizes every API call itself
+# (SubjectAccessReviews for the user in auth.userIdHeader).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ $name }}
+  extAuth: {{- include "kni.extAuth" . | nindent 4 }}
+  jwt:
+    providers:
+      - {{- include "kni.jwtProvider" . | nindent 8 }}
+{{- end }}

@@ -1,0 +1,197 @@
+{{/* oauth2-proxy performs the OIDC login; Envoy Gateway calls it via the
+ext_authz part of every per-route SecurityPolicy (see kni.extAuth). All
+objects live in the release namespace. */}}
+{{- $ctx := dict "root" $ "component" "oauth2-proxy" }}
+{{- $name := include "kni.componentName" $ctx }}
+{{- $op := .Values.oauth2Proxy }}
+{{- $ss := $op.sessionStore }}
+{{- if not $op.cookieSecret.existingSecret }}
+{{- $cookieSecret := $op.cookieSecret.value }}
+{{- if not $cookieSecret }}
+{{- /* Keep the generated cookie secret stable across helm upgrades. */}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+{{- if $existing }}
+{{- $cookieSecret = index ($existing.data | default dict) "cookie-secret" | default "" | b64dec }}
+{{- end }}
+{{- if not $cookieSecret }}
+{{- $cookieSecret = randAlphaNum 32 }}
+{{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+type: Opaque
+stringData:
+  cookie-secret: {{ $cookieSecret | quote }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "kni.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 4180
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $op.replicas }}
+  selector:
+    matchLabels: {{- include "kni.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "kni.componentLabels" $ctx | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth2-proxy
+          image: "{{ $op.image.repository }}:{{ $op.image.tag }}"
+          imagePullPolicy: {{ $op.image.pullPolicy }}
+          args:
+            - --provider=oidc
+            - {{ printf "--oidc-issuer-url=%s" .Values.auth.oidc.issuer | quote }}
+            - {{ printf "--client-id=%s" .Values.auth.oidc.clientID | quote }}
+            - {{ printf "--redirect-url=%s" (include "kni.redirectURL" .) | quote }}
+            - {{ printf "--scope=%s" (join " " .Values.auth.oidc.scopes) | quote }}
+            {{- /* oauth2-proxy has to know the user claim itself, otherwise it
+            fails for IdPs that do not provide an email claim. */}}
+            - {{ printf "--user-id-claim=%s" .Values.auth.jwt.userClaim | quote }}
+            {{- with .Values.auth.jwt.groupsClaim }}
+            - {{ printf "--oidc-groups-claim=%s" . | quote }}
+            {{- end }}
+            - --http-address=0.0.0.0:4180
+            - --reverse-proxy=true
+            - --upstream=static://200
+            - --set-authorization-header=true
+            - --skip-provider-button=true
+            - "--email-domain=*"
+            - --code-challenge-method=S256
+            {{- if eq $ss.type "redis" }}
+            {{- /* Large ID tokens (many groups) do not fit into the cookie
+            session store (header size limits); keep the tokens in Redis. */}}
+            - --session-store-type=redis
+            {{- $redisName := include "kni.componentName" (dict "root" $ "component" "redis") }}
+            {{- $redisURL := $ss.redis.connectionURL }}
+            {{- if $ss.redis.create }}
+            {{- $redisURL = printf "redis://%s:6379" $redisName }}
+            {{- end }}
+            - {{ printf "--redis-connection-url=%s" $redisURL | quote }}
+            {{- end }}
+            - {{ printf "--cookie-name=%s" $op.cookieName | quote }}
+            - {{ printf "--cookie-expire=%s" $op.cookieExpire | quote }}
+            {{- /* cookie-refresh=0: Envoy Gateway does not forward ext_authz
+            response headers to the client on a successful check, so a refreshed
+            cookie set here would never reach the browser and would be lost. */}}
+            - --cookie-refresh=0
+            - --cookie-secure=true
+            - --cookie-samesite=lax
+            {{- with $op.cookieDomain }}
+            - {{ printf "--cookie-domain=%s" . | quote }}
+            {{- end }}
+            {{- range $op.apiRoutes }}
+            - {{ printf "--api-route=%s" . | quote }}
+            {{- end }}
+            - --silence-ping-logging=true
+            {{- range $op.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 4180
+          env:
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kni.oidcSecretName" . }}
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $op.cookieSecret.existingSecret | default $name }}
+                  key: cookie-secret
+            {{- if eq $ss.type "redis" }}
+            - name: OAUTH2_PROXY_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ss.redis.existingSecret | default (include "kni.componentName" (dict "root" $ "component" "redis")) }}
+                  key: redis-password
+            {{- end }}
+          {{- with $op.extraEnv }}
+          {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with $op.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $op.extraVolumeMounts }}
+          volumeMounts: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with $op.extraVolumes }}
+      volumes: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $op.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $op.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $op.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+# Login, callback and sign-out. Must NOT carry a SecurityPolicy: the ext_authz
+# check itself redirects here when there is no valid session.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
+spec:
+  parentRefs:
+    - namespace: {{ include "kni.gatewayNamespace" . }}
+      {{- include "kni.gatewayRef" . | nindent 6 }}
+  hostnames:
+    - {{ .Values.gateway.hostname | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /oauth2
+      backendRefs:
+        - name: {{ $name }}
+          port: 4180

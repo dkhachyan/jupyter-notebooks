@@ -1,0 +1,17 @@
+Kubeflow Notebooks (no Istio) is installed.
+
+  Notebook UI:   https://{{ .Values.gateway.hostname }}{{ .Values.jupyterWebApp.prefix }}/
+  Notebook URLs: https://{{ .Values.gateway.hostname }}/notebook/<namespace>/<name>/
+  Login:         oauth2-proxy; sign out at https://{{ .Values.gateway.hostname }}/oauth2/sign_out
+  OIDC redirect URI to register with the provider:
+                 {{ include "kni.redirectURL" . }}
+
+Per-notebook access is granted to RBAC subjects allowed to "{{ .Values.routeController.accessVerb }}"
+notebooks.kubeflow.org/<name> in the notebook namespace. Inspect the effective allow-list with:
+
+  kubectl get securitypolicy -n <namespace> notebook-<namespace>-<name> -o yaml
+{{- if not .Values.networkPolicy.enabled }}
+
+WARNING: networkPolicy.enabled=false. Notebook Services are reachable from inside the
+cluster without passing the gateway's per-notebook authorization.
+{{- end }}

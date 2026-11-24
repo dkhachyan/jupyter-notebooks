@@ -1,8 +1,0 @@
-# Upstream reference clones (audit-only, not part of the deliverable)
-/.upstream/
-/.audit/tmp/
-# Helm build artifacts (the packaged .tgz is committed explicitly when needed)
-/charts/*/charts/*.tgz.orig
-# Go
-*.test
-coverage.out

@@ -1,0 +1,44 @@
+# Keycloak as OIDC provider, attaching to a Gateway managed elsewhere and
+# mapping Keycloak groups to RBAC groups with the API server's OIDC prefixes
+# (kube-apiserver --oidc-username-prefix=oidc: --oidc-groups-prefix=oidc:).
+gateway:
+  create: false
+  name: shared-gateway
+  namespace: gateways
+  sectionName: kubeflow-https
+  hostname: kubeflow.corp.example
+
+auth:
+  oidc:
+    issuer: https://sso.corp.example/realms/ml
+    clientID: kubeflow
+    clientSecret:
+      existingSecret: kubeflow-oidc   # in the release namespace, key: client-secret
+    jwksURI: https://sso.corp.example/realms/ml/protocol/openid-connect/certs
+    scopes: [openid, email, profile]
+  jwt:
+    userClaim: email
+    groupsClaim: groups
+
+routeController:
+  image:
+    repository: registry.corp.example/ml/notebook-route-controller
+    tag: 0.1.0
+  replicas: 2
+  userPrefix: "oidc:"
+  groupPrefix: "oidc:"
+
+networkPolicy:
+  # Envoy Gateway in "GatewayNamespace" deployment mode: proxies run next to the Gateway.
+  gatewayPeers:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: gateways
+      podSelector:
+        matchLabels:
+          gateway.envoyproxy.io/owning-gateway-name: shared-gateway
+
+notebookController:
+  culling:
+    enabled: true
+    idleTimeMinutes: 720

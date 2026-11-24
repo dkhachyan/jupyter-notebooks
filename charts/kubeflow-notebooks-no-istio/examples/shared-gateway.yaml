@@ -1,0 +1,55 @@
+# Attaching to an existing shared Gateway listener that also serves other
+# teams' routes. The chart creates no gateway-level policies: authentication
+# rides on each route's SecurityPolicy (ext_authz -> oauth2-proxy, then JWT),
+# so nothing on the listener is affected and no ReferenceGrant or policy is
+# created in the Gateway's namespace.
+gateway:
+  create: false
+  name: shared-gateway
+  namespace: gateway-infra
+  sectionName: https
+  hostname: kubeflow.example.com
+
+auth:
+  oidc:
+    issuer: https://idp.example.com/realms/master
+    clientID: kubeflow-notebooks
+    clientSecret:
+      existingSecret: kubeflow-oidc   # in the release namespace, key: client-secret
+    # In-cluster JWKS endpoint fetched by Envoy over plain http; the issuer in
+    # the tokens must still match auth.oidc.issuer.
+    jwksURI: http://idp.idp.svc:8080/realms/master/protocol/openid-connect/certs
+
+routeController:
+  image:
+    repository: registry.example.com/kubeflow/notebook-route-controller
+    tag: 0.1.0
+
+oauth2Proxy:
+  # Example: an IdP behind a TLS certificate from a private CA. oauth2-proxy
+  # does not use the node trust store for its OIDC issuer connection, so the CA
+  # certificate has to be mounted from a Secret.
+  extraArgs:
+    - --provider-ca-file=/etc/ssl/idp/ca.crt
+  # Example: ID tokens with many groups do not fit into the cookie session
+  # store (browser and Envoy Gateway header limits); keep the sessions in Redis.
+  sessionStore:
+    type: redis
+  extraVolumes:
+    - name: idp-ca
+      secret:
+        secretName: idp-ca
+  extraVolumeMounts:
+    - name: idp-ca
+      mountPath: /etc/ssl/idp
+      readOnly: true
+
+networkPolicy:
+  # Envoy proxy pods of the shared gateway run in the Gateway's namespace.
+  gatewayPeers:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: gateway-infra
+      podSelector:
+        matchLabels:
+          gateway.envoyproxy.io/owning-gateway-name: shared-gateway

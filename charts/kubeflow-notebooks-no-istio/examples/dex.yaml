@@ -1,0 +1,21 @@
+# Kubeflow with an existing Dex, using Envoy Gateway already installed in
+# envoy-gateway-system. The OIDC client must allow the redirect URI
+# https://kubeflow.example.com/oauth2/callback and issue the "groups" claim.
+# The client secret stays in the release namespace (key: client-secret).
+gateway:
+  hostname: kubeflow.example.com
+  listener:
+    tlsSecretName: kubeflow-example-com-tls
+
+auth:
+  oidc:
+    issuer: https://dex.example.com/dex
+    clientID: kubeflow-notebooks
+    clientSecret:
+      existingSecret: kubeflow-notebooks-oidc   # key: client-secret
+    jwksURI: https://dex.example.com/dex/keys
+
+routeController:
+  image:
+    repository: registry.example.com/kubeflow/notebook-route-controller
+    tag: 0.1.0
