@@ -110,6 +110,7 @@ tests/                envtest integration tests (real kube-apiserver with RBAC)
 * `kubeflow.org` notebooks: get/list/watch; `notebooks/finalizers`: update
 * HTTPRoutes, SecurityPolicies, NetworkPolicies: full; ReferenceGrants:
   get/create/update/patch/delete (in the ext-auth namespace only)
+* Namespaces: get/list/watch (for the namespaces API)
 * RBAC objects: get/list/watch (read-only)
 * `subjectaccessreviews`: create
 * `events.k8s.io` events: create/patch

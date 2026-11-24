@@ -98,7 +98,7 @@ metadata:
     app.kubernetes.io/name: oauth2-proxy
 type: Opaque
 stringData:
-  cookie-secret: "D4SoDUAaf19bDMJQ2Pn6W8mQmAJNTs6C"
+  cookie-secret: "8p4EmOgaHLuA6tqDumIU0c4t6bgl7izs"
 ---
 # Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -257,6 +257,33 @@ metadata:
 rules:
   - apiGroups: [kubeflow.org]
     resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch]
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+# Not upstream. Everything the Jupyter web app checks (per user, in the
+# namespace) to list, create, inspect and delete notebooks; bind it with a
+# RoleBinding per user and namespace. In Kubeflow this comes from kubeflow-edit.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-user
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch, create, delete, deletecollection, patch, update]
+  - apiGroups: [kubeflow.org]
+    resources: [poddefaults]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, watch, create, delete, patch, update]
+  - apiGroups: [""]
+    resources: [pods, pods/log, events]
     verbs: [get, list, watch]
 ---
 # Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
@@ -671,6 +698,7 @@ spec:
             - --cookie-refresh=0
             - --cookie-secure=true
             - --cookie-samesite=lax
+            - "--api-route=^/api/namespaces$"
             - "--api-route=^/jupyter/api/"
             - "--api-route=^/notebook/[^/]+/[^/]+/api/"
             - --silence-ping-logging=true
@@ -849,9 +877,13 @@ spec:
     # Namespace dropdown of the web app: served by the route controller, which
     # filters namespaces by the list-notebooks permission of the user. Must be
     # a rule of THIS route so that the SecurityPolicy above (ext_authz + jwt
-    # setting the trusted auth.userIdHeader) applies to it. No URLRewrite: the
-    # endpoint parses the raw path.
+    # setting the trusted auth.userIdHeader) applies to it. The dropdown requests
+    # the absolute /api/namespaces (served by the central dashboard in Kubeflow);
+    # the prefixed path is the web app's own endpoint.
     - matches:
+        - path:
+            type: Exact
+            value: /api/namespaces
         - path:
             type: Exact
             value: /jupyter/api/namespaces
@@ -1080,7 +1112,7 @@ metadata:
     app.kubernetes.io/name: oauth2-proxy
 type: Opaque
 stringData:
-  cookie-secret: "eSOO3l1ycPvN79GjwpGnDH7SiOoi8EiC"
+  cookie-secret: "ScFU4wrPihK13bcJA9FQpbEDlqNs2RIT"
 ---
 # Source: kubeflow-notebooks-no-istio/templates/redis.yaml
 apiVersion: v1
@@ -1096,7 +1128,7 @@ metadata:
     app.kubernetes.io/name: redis
 type: Opaque
 stringData:
-  redis-password: "jl6yzawpPKz6HfKGpioxVlFAqNr1JqOt"
+  redis-password: "ETaTgFOuwzjs2kJB3LNLAu8O9Gi607hL"
 ---
 # Source: kubeflow-notebooks-no-istio/templates/jupyter-web-app.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -1255,6 +1287,33 @@ metadata:
 rules:
   - apiGroups: [kubeflow.org]
     resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch]
+---
+# Source: kubeflow-notebooks-no-istio/templates/notebook-controller.yaml
+# Not upstream. Everything the Jupyter web app checks (per user, in the
+# namespace) to list, create, inspect and delete notebooks; bind it with a
+# RoleBinding per user and namespace. In Kubeflow this comes from kubeflow-edit.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeflow-notebooks-user
+  labels:
+    helm.sh/chart: kubeflow-notebooks-no-istio-0.1.0
+    app.kubernetes.io/part-of: kubeflow-notebooks-no-istio
+    app.kubernetes.io/instance: it
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks, notebooks/status]
+    verbs: [get, list, watch, create, delete, deletecollection, patch, update]
+  - apiGroups: [kubeflow.org]
+    resources: [poddefaults]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, watch, create, delete, patch, update]
+  - apiGroups: [""]
+    resources: [pods, pods/log, events]
     verbs: [get, list, watch]
 ---
 # Source: kubeflow-notebooks-no-istio/templates/route-controller.yaml
@@ -1694,6 +1753,7 @@ spec:
             - --cookie-refresh=0
             - --cookie-secure=true
             - --cookie-samesite=lax
+            - "--api-route=^/api/namespaces$"
             - "--api-route=^/jupyter/api/"
             - "--api-route=^/notebook/[^/]+/[^/]+/api/"
             - --silence-ping-logging=true
@@ -1936,9 +1996,13 @@ spec:
     # Namespace dropdown of the web app: served by the route controller, which
     # filters namespaces by the list-notebooks permission of the user. Must be
     # a rule of THIS route so that the SecurityPolicy above (ext_authz + jwt
-    # setting the trusted auth.userIdHeader) applies to it. No URLRewrite: the
-    # endpoint parses the raw path.
+    # setting the trusted auth.userIdHeader) applies to it. The dropdown requests
+    # the absolute /api/namespaces (served by the central dashboard in Kubeflow);
+    # the prefixed path is the web app's own endpoint.
     - matches:
+        - path:
+            type: Exact
+            value: /api/namespaces
         - path:
             type: Exact
             value: /jupyter/api/namespaces
