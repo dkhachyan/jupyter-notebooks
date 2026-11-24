@@ -28,7 +28,7 @@ directory.
 ```
 browser ──► Envoy Gateway
         │
-        ├── HTTPRoute <release>-oauth2  /oauth2/*              ──► oauth2-proxy:4180
+        ├── HTTPRoute <fullname>-oauth2-proxy  /oauth2/*       ──► oauth2-proxy:4180
         │       (login, callback, sign-out; no SecurityPolicy)
         │
         └── every other route created by this chart, each carrying its own
@@ -86,6 +86,25 @@ and its own `/oauth2` HTTPRoute, a SecurityPolicy with the same ext_authz + JWT
 setup for the Jupyter web app route (`/jupyter`, with `/` redirecting to it),
 an optional Gateway, and nothing that targets the Gateway itself — the chart
 works on a shared listener used by other teams as well.
+
+### Gateway objects
+
+| Created by | Object | API group / version | Namespace |
+|---|---|---|---|
+| Chart | HTTPRoute `<fullname>-jupyter-web-app` (`/jupyter`, `/` redirect, `/api/namespaces`) | `gateway.networking.k8s.io/v1` | release |
+| Chart | HTTPRoute `<fullname>-oauth2-proxy` (`/oauth2/*`, no policy) | `gateway.networking.k8s.io/v1` | release |
+| Chart | SecurityPolicy `<fullname>-jupyter-web-app` (extAuth + JWT) | `gateway.envoyproxy.io/v1alpha1` | release |
+| Chart (`gateway.create=true` only) | Gateway `gateway.name` | `gateway.networking.k8s.io/v1` | `gateway.namespace` |
+| Controller | HTTPRoute `notebook-<ns>-<name>`, one per Notebook | `gateway.networking.k8s.io/v1` | notebook |
+| Controller | SecurityPolicy `notebook-<ns>-<name>`, one per Notebook (extAuth + JWT + authorization) | `gateway.envoyproxy.io/v1alpha1` | notebook |
+| Controller | ReferenceGrant `notebook-extauth-<ns>`, one per notebook namespace other than the release namespace | `gateway.networking.k8s.io/v1beta1` | release |
+| Controller | NetworkPolicy `notebook-<ns>-<name>`, one per Notebook (Kubernetes, not Envoy Gateway) | `networking.k8s.io/v1` | notebook |
+
+Every SecurityPolicy targets an HTTPRoute (`targetRefs[].kind: HTTPRoute`),
+never a Gateway or listener. The chart and the controller create no
+ClientTrafficPolicy, BackendTrafficPolicy, EnvoyExtensionPolicy,
+EnvoyPatchPolicy, HTTPRouteFilter, Backend or EnvoyProxy, and nothing in the
+Gateway's namespace unless `gateway.create=true`.
 
 ### Authorization
 
