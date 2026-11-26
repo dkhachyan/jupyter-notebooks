@@ -11,3 +11,5 @@ controller/coverage.out
 *.test
 # macOS
 .DS_Store
+# Cluster-specific values (internal, never published)
+/deploy/
