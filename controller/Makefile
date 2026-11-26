@@ -26,8 +26,8 @@ test: ## Unit tests (no cluster required).
 
 .PHONY: test-integration
 test-integration: $(ENVTEST) envtest-crds ## Integration tests against a real kube-apiserver with RBAC and the pinned CRDs.
-	{ helm template it $(CHART_DIR) -n kubeflow -f $(CHART_DIR)/examples/dex.yaml; echo ---; \
-	  helm template it $(CHART_DIR) -n kubeflow -f $(CHART_DIR)/examples/shared-gateway.yaml; } > $(LOCALBIN)/chart-render.yaml
+	{ helm template it $(CHART_DIR) -n kubeflow -f $(CHART_DIR)/examples/dex.yaml --set crds.install=false; echo ---; \
+	  helm template it $(CHART_DIR) -n kubeflow -f $(CHART_DIR)/examples/shared-gateway.yaml --set crds.install=false; } > $(LOCALBIN)/chart-render.yaml
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 	ENVTEST_CRDS=$(LOCALBIN)/crds CHART_RENDER=$(LOCALBIN)/chart-render.yaml \
 		go test ./tests/... -count=1 -v
@@ -40,7 +40,12 @@ envtest-crds: ## Extract the real CRDs pinned by the chart (Gateway API, Envoy G
 		gateway-helm/charts/crds/crds/gatewayapi-crds.yaml
 	tar -xzf $(CHART_DIR)/charts/gateway-helm-*.tgz -C $(LOCALBIN)/crds --strip-components=5 \
 		gateway-helm/charts/crds/crds/generated
-	cp $(CHART_DIR)/crds/*.yaml $(LOCALBIN)/crds/
+	helm template crds $(CHART_DIR) -n kubeflow \
+		--set gateway.hostname=x --set auth.oidc.issuer=https://x \
+		--set auth.oidc.clientID=x --set auth.oidc.jwksURI=https://x/keys \
+		--set auth.oidc.clientSecret.value=x \
+		--show-only templates/crds/notebooks.kubeflow.org.yaml \
+		> $(LOCALBIN)/crds/notebooks.kubeflow.org.yaml
 
 .PHONY: build
 build:
@@ -67,9 +72,11 @@ helm-lint: ## Lint and render the chart with every example values file.
 
 .PHONY: sync-notebook-crd
 sync-notebook-crd: ## Re-render the upstream Notebook CRD (unmodified) into the chart.
-	{ printf '# notebooks.kubeflow.org CRD rendered unmodified from upstream:\n#   repo: https://github.com/kubeflow/notebooks  tag: $(KF_NOTEBOOKS_VERSION)\n#   kubectl kustomize components/notebook-controller/config/crd\n# Regenerate with: make -C controller sync-notebook-crd\n'; \
+	{ printf '{{- if .Values.crds.install }}\n'; \
+	  printf '# notebooks.kubeflow.org CRD rendered unmodified from upstream:\n#   repo: https://github.com/kubeflow/notebooks  tag: $(KF_NOTEBOOKS_VERSION)\n#   kubectl kustomize components/notebook-controller/config/crd\n# Regenerate with: make -C controller sync-notebook-crd\n'; \
 	  kubectl kustomize "https://github.com/kubeflow/notebooks//components/notebook-controller/config/crd?ref=$(KF_NOTEBOOKS_VERSION)"; \
-	} > $(CHART_DIR)/crds/notebooks.kubeflow.org.yaml
+	  printf '{{- end }}\n'; \
+	} > $(CHART_DIR)/templates/crds/notebooks.kubeflow.org.yaml
 
 $(ENVTEST):
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)

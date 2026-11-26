@@ -10,6 +10,15 @@
     "nameOverride": {
       "type": "string"
     },
+    "crds": {
+      "type": "object",
+      "properties": {
+        "install": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "fullnameOverride": {
       "type": "string"
     },

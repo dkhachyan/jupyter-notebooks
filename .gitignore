@@ -1,0 +1,13 @@
+# Upstream reference clones (audit-only, not part of the deliverable)
+/.upstream/
+/.audit/tmp/
+# Helm build artifacts: the dependency .tgz files are downloaded by
+# `helm dependency build`; Chart.lock is committed.
+/charts/*/charts/
+*.tgz
+# Go: build/test outputs and envtest binaries
+controller/bin/
+controller/coverage.out
+*.test
+# macOS
+.DS_Store

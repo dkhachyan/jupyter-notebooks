@@ -36,7 +36,7 @@ notebookController:
 # -- The notebook-route-controller from this repository.
 routeController:
   image:
-    repository: notebook-route-controller
+    repository: ghcr.io/dkhachyan/notebook-route-controller
     # Defaults to .Chart.AppVersion.
     tag: ""
     pullPolicy: IfNotPresent
@@ -251,6 +251,12 @@ jupyterWebApp:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+# -- Install the notebooks.kubeflow.org CRD as part of the chart (for helm /
+# Argo CD --include-crds). Set to false when the CRD is managed by something
+# else (an existing Kubeflow install, deployKF, ...).
+crds:
+  install: true
 
 # -- Optional Envoy Gateway installation (chart dependency gateway-helm).
 # Leave disabled when Envoy Gateway is already installed in the cluster.

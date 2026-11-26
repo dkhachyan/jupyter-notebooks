@@ -255,7 +255,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels: {{- include "kni.componentLabels" $ctx | nindent 4 }}
 spec:
-  podSelector: {{- include "kni.selectorLabels" $ctx | nindent 4 }}
+  podSelector:
+    matchLabels: {{- include "kni.selectorLabels" $ctx | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:

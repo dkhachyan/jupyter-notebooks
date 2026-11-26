@@ -1,3 +1,4 @@
+{{- if .Values.crds.install }}
 # notebooks.kubeflow.org CRD rendered unmodified from upstream:
 #   repo: https://github.com/kubeflow/notebooks  tag: v1.11.1
 #   kubectl kustomize components/notebook-controller/config/crd
@@ -9587,3 +9588,4 @@ spec:
     storage: false
     subresources:
       status: {}
+{{- end }}

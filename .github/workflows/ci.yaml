@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: controller/go.mod
+
+      - name: Go fmt / vet / unit tests
+        run: |
+          make -C controller fmt vet test
+          # go fmt must not change anything.
+          git diff --exit-code
+
+      # setup-envtest (invoked by the Makefile) downloads the kube-apiserver
+      # binaries itself; it runs fine on the linux runner.
+      - name: Integration tests (envtest)
+        run: make -C controller test-integration
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Helm lint and render
+        run: make -C controller helm-lint

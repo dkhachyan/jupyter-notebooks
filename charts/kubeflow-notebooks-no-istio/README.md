@@ -199,8 +199,11 @@ helm upgrade --install kubeflow-notebooks charts/kubeflow-notebooks-no-istio \
   -n kubeflow -f charts/kubeflow-notebooks-no-istio/examples/dex.yaml
 ```
 
-Build and push the route controller image first (`make -C controller
-docker-buildx IMG=...`), then set `routeController.image`.
+By default the chart pulls the route controller from
+`ghcr.io/dkhachyan/notebook-route-controller` at the chart's `appVersion` —
+published by the GitHub Actions release workflow (a `v*` tag builds and pushes
+the image and the OCI chart to `ghcr.io/dkhachyan/charts`). For a local build
+(`make -C controller docker-buildx IMG=...`) set `routeController.image`.
 
 Example values:
 
@@ -211,15 +214,21 @@ Example values:
 | `examples/dev-kind.yaml` | kind/dev: Envoy Gateway as a dependency, inline client secret |
 | `examples/shared-gateway.yaml` | A shared listener owned by another team, in-cluster JWKS URI, IdP behind a private CA |
 
-The CRD in `crds/` is installed on first install only (Helm behaviour). Apply
-it manually on upgrades:
-`kubectl apply --server-side -f charts/kubeflow-notebooks-no-istio/crds/`.
+The `notebooks.kubeflow.org` CRD now lives in `templates/crds/` instead of the
+chart's `crds/` directory: it is applied — and updated — by the chart itself on
+every install and upgrade, including `helm template --include-crds`, which is
+what Argo CD needs. Heads-up for `helm upgrade` users: this also changes
+uninstall behaviour. A resource from `templates/` is **removed together with
+the chart**, and deleting the CRD deletes every Notebook object with it. Set
+`crds.install=false` when the CRD is managed by something else (an existing
+Kubeflow install, deployKF, ...).
 
 ## Key values
 
 | Value | Default | Description |
 |---|---|---|
 | `gateway.hostname` | — (required) | Public hostname; set on the listener and all routes |
+| `crds.install` | `true` | Install the `notebooks.kubeflow.org` CRD with the chart; `false` when something else manages it (note: the CRD is removed on uninstall) |
 | `gateway.create` / `gateway.name` / `gateway.namespace` / `gateway.sectionName` | `true` / `kubeflow-gateway` / release ns / `https` | Gateway and listener the routes attach to |
 | `auth.oidc.issuer`, `clientID`, `jwksURI` | — (required) | Existing OIDC provider; `jwksURI` may be an in-cluster `http://` URL |
 | `auth.oidc.clientSecret.existingSecret` | — | Secret (key `client-secret`) in the release namespace |
